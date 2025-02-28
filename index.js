@@ -11,7 +11,9 @@ const mongoURI = process.env.MONGO_URI;
 const dbName = "taskManager";
 const collectionName = "tasks";
 
-app.use(cors());
+//app.use(cors());
+app.use(cors({ origin: "*" }));
+
 app.use(express.json());
 
 let db;
@@ -28,6 +30,18 @@ MongoClient.connect(mongoURI, {
     console.log("Connected to MongoDB");
   })
   .catch((error) => console.error("MongoDB connection error:", error));
+
+// test db collection
+app.get("/test-db", async (req, res) => {
+  try {
+    await tasksCollection.findOne({});
+    res.status(200).json({ message: "Database connection successful" });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ message: "Database connection failed", error: error.message });
+  }
+});
 
 // Add a new task
 app.post("/tasks", async (req, res) => {
@@ -85,7 +99,7 @@ app.get("/tasks", async (req, res) => {
 });
 
 // Retrieve tasks by category
-app.get("/tasks/category/:category", async (req, res) => {
+/* app.get("/tasks/category/:category", async (req, res) => {
   try {
     const { userId } = req.query;
     const { category } = req.params;
@@ -99,6 +113,26 @@ app.get("/tasks/category/:category", async (req, res) => {
     res.status(200).json(tasks);
   } catch (error) {
     res.status(500).json({ message: "Error retrieving tasks", error });
+  }
+}); */
+
+app.get("/tasks/category/:category", async (req, res) => {
+  try {
+    const { userId } = req.query;
+    const { category } = req.params;
+    if (!userId) {
+      return res.status(400).json({ message: "User  ID is required" });
+    }
+    const tasks = await tasksCollection
+      .find({ userId, status: category })
+      .sort({ order: 1 })
+      .toArray();
+    res.status(200).json(tasks);
+  } catch (error) {
+    console.error("Error retrieving tasks:", error); // Log the error
+    res
+      .status(500)
+      .json({ message: "Error retrieving tasks", error: error.message });
   }
 });
 
@@ -130,39 +164,49 @@ app.put("/tasks/:id", async (req, res) => {
   }
 });
 
-// Reorder tasks
-app.put("/tasks/reorder", async (req, res) => {
+app.put("/tasks/:id", async (req, res) => {
   try {
-    const { userId, tasks } = req.body;
+    const { id } = req.params;
+    const { status } = req.body;
 
-    const bulkOps = tasks.map((task, index) => ({
-      updateOne: {
-        filter: { _id: new ObjectId(task._id) },
-        update: { $set: { order: index + 1, status: task.status } },
-      },
-    }));
+    if (!status) {
+      return res.status(400).json({ message: "Status is required" });
+    }
 
-    await tasksCollection.bulkWrite(bulkOps);
-    res.status(200).json({ message: "Tasks reordered successfully" });
+    const result = await tasksCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { status } }
+    );
+
+    if (result.modifiedCount === 0) {
+      return res.status(404).json({ message: "Task not found" });
+    }
+
+    res.json({ message: "Task status updated" });
   } catch (error) {
-    res.status(500).json({ message: "Error reordering tasks", error });
+    res.status(500).json({ message: "Error updating task status", error });
   }
 });
 
-// Reorder tasks within the same column (status)
+// Reorder tasks within the same column
 app.put("/tasks/reorder", async (req, res) => {
   try {
-    const { userId, tasks } = req.body;
+    const { tasks } = req.body;
 
+    if (!tasks || !Array.isArray(tasks)) {
+      return res.status(400).json({ message: "Invalid task order data" });
+    }
+
+    // Bulk update task positions
     const bulkOps = tasks.map((task, index) => ({
       updateOne: {
-        filter: { _id: new ObjectId(task._id) },
-        update: { $set: { order: index + 1, status: task.status } },
+        filter: { _id: new ObjectId(task.id) },
+        update: { $set: { position: index } },
       },
     }));
 
     await tasksCollection.bulkWrite(bulkOps);
-    res.status(200).json({ message: "Tasks reordered successfully" });
+    res.json({ message: "Task order updated" });
   } catch (error) {
     res.status(500).json({ message: "Error reordering tasks", error });
   }
